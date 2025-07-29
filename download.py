@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 from pathlib import Path
 from .utils import CONFIG, ensure_dir
 import re
@@ -41,7 +42,6 @@ async def run(args, config, logger):
         semaphore = asyncio.Semaphore(CONFIG['max_concurrent_downloads'])
 
         async def download_file(session, url, index, total):
-            import aiohttp
             retries = 3
             async with semaphore:
                 for attempt in range(retries):
@@ -77,7 +77,6 @@ async def run(args, config, logger):
                         else:
                             logger.log('ERROR', f"[{target}] [{index+1}/{total}] Failed: {url} - {str(e)}")
                             return False
-        import aiohttp
         async with aiohttp.ClientSession() as session:
             tasks = [download_file(session, url, i, len(urls)) for i, url in enumerate(urls)]
             await asyncio.gather(*tasks)

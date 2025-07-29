@@ -1,9 +1,11 @@
 import concurrent.futures
+import subprocess
+import json
 from pathlib import Path
+from tqdm import tqdm
 from .utils import CONFIG, ensure_dir
 
 def run(args, config, logger):
-    from tqdm import tqdm
     for target in args.targets:
         target_dir = Path(args.output) / target
         js_files_dir = target_dir / CONFIG['dirs']['js_files']
@@ -27,7 +29,6 @@ def run(args, config, logger):
                         logger.log('ERROR', f"[{target}] Error processing file: {str(e)}")
 
 def analyze_js_file(target, target_dir, js_file, logger):
-    import subprocess, json
     results_dir = target_dir / CONFIG['dirs']['results']
     # jsluice analysis
     jsluice_dir = results_dir / CONFIG['dirs']['jsluice']
@@ -79,7 +80,6 @@ def analyze_js_file(target, target_dir, js_file, logger):
             f.write(stdout)
 
 def _run_command(cmd, timeout=CONFIG['timeouts']['command']):
-    import subprocess
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return result.returncode, result.stdout, result.stderr

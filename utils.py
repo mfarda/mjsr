@@ -34,15 +34,7 @@ CONFIG = {
         'config', 'utils', 'api', 'handler', 'module', 'cache'
     ],
     'separators': ['', '-', '_', '.'],
-    'default_output_dir': 'js_recon_output',
-    'default_depth': 5,
-    'default_ext': 'js',
     'default_url_scheme': 'https://',
-    'error_messages': {
-        'targets_file_not_found': 'Targets file {file} not found.',
-        'url_list_file_not_found': 'URL list file {file} not found.',
-        'error_reading_url_list': 'Error reading URL list file: {error}'
-    },
     'ffuf': {
         'raw_suffix': '_raw.txt',
         'filtered_suffix': '_filtered.txt',
