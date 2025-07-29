@@ -1,3 +1,5 @@
 aiohttp
 tqdm
-requests 
+requests
+PyGithub
+gitpython 

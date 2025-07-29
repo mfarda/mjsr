@@ -2,11 +2,11 @@ import argparse
 from pathlib import Path
 from .utils import CONFIG
 from .logger import Logger
-from . import gather, verify, deduplicate, download, analyze, fuzzing, toolcheck, report
+from . import gather, verify, deduplicate, download, analyze, fuzzing, toolcheck, report, github_recon
 
 def main():
     parser = argparse.ArgumentParser(description="Modular JS Recon Tool")
-    parser.add_argument('commands', nargs='+', choices=['gather', 'verify', 'deduplicate', 'download', 'analyze', 'fuzz', 'report'], help='Commands to run in sequence')
+    parser.add_argument('commands', nargs='+', choices=['gather', 'verify', 'deduplicate', 'download', 'analyze', 'fuzz', 'report', 'github'], help='Commands to run in sequence')
     parser.add_argument('-t', '--targets', help='Target domains (comma-separated) - required unless using --input')
     parser.add_argument('-o', '--output', default='./output', help='Output directory')
     parser.add_argument('-d', '--depth', type=int, default=5, help='Katana crawl depth (for gather)')
@@ -22,6 +22,13 @@ def main():
     parser.add_argument('--fuzz-threads', type=int, default=10, help='Number of concurrent fuzzing threads (default: 10)')
     parser.add_argument('--fuzz-timeout', type=int, default=30, help='Timeout for each fuzzing request in seconds (default: 30)')
     parser.add_argument('--fuzz-no-timeout', action='store_true', help='Disable timeout for ffuf (useful for large wordlists)')
+    
+    # GitHub reconnaissance specific arguments
+    parser.add_argument('--github-token', help='GitHub API token for higher rate limits')
+    parser.add_argument('--github-max-repos', type=int, default=10, help='Maximum number of repositories to analyze per target (default: 10)')
+    parser.add_argument('--github-scan-tools', choices=['trufflehog', 'gitleaks', 'custom', 'all'], default='all', 
+                       help='Secret scanning tools to use (default: all)')
+    parser.add_argument('--github-skip-clone', action='store_true', help='Skip cloning repositories (only use API data)')
     
     args = parser.parse_args()
 
@@ -70,6 +77,8 @@ def main():
             fuzzing.run(args, CONFIG, logger)
         elif command == 'report':
             report.run(args, CONFIG, logger)
+        elif command == 'github':
+            github_recon.run(args, CONFIG, logger)
 
 if __name__ == "__main__":
     main()

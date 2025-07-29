@@ -1,5 +1,15 @@
 import logging
-from .utils import ensure_dir
+import os
+import sys
+from pathlib import Path
+
+# Handle both relative and absolute imports
+try:
+    from .utils import ensure_dir
+except ImportError:
+    # If running as standalone script, add parent to path
+    sys.path.insert(0, str(Path(__file__).parent))
+    from utils import ensure_dir
 
 class Colors:
     RED = '\033[0;31m'

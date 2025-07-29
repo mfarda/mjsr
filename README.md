@@ -11,6 +11,7 @@ A modular, extensible, and automated toolkit for JavaScript reconnaissance, endp
 - **Fuzz** for additional JS files using wordlists and permutations (ffuf)
 - **Deduplicate** JS URLs before downloading using HTTP headers
 - **Report** comprehensive statistics and findings
+- **GitHub Recon** Search GitHub repositories for secrets and useful data
 - **Modular**: Each step is a separate module, easy to extend or replace
 - **Independent Operation**: Run modules independently with custom input files
 - **Advanced Fuzzing**: Multiple fuzzing modes with fine-grained control
@@ -28,11 +29,14 @@ A modular, extensible, and automated toolkit for JavaScript reconnaissance, endp
   - [ffuf](https://github.com/ffuf/ffuf)
   - [jsluice](https://github.com/BishopFox/jsluice)
   - [trufflehog](https://github.com/trufflesecurity/trufflehog)
+  - [gitleaks](https://github.com/gitleaks/gitleaks) (for GitHub recon)
   - Python scripts: `secretfinder.py`, `linkfinder.py` (should be in the `mjsrecon` directory)
 - **Python packages**:
   - `aiohttp`
   - `tqdm`
   - `requests`
+  - `PyGithub`
+  - `gitpython`
 
 Install Python dependencies:
 ```sh
@@ -46,6 +50,7 @@ pip install -r requirements.txt
 1. **Clone the repository** and ensure all external tools are installed and in your PATH.
 2. Place `secretfinder.py` and `linkfinder.py` in the `mjsrecon` directory.
 3. (Optional) Create a virtual environment and install Python dependencies.
+4. (Optional) Set up GitHub API token for higher rate limits: `export GITHUB_TOKEN=your_token_here`
 
 ---
 
@@ -66,6 +71,7 @@ python -m mjsrecon.core [commands] [options]
 - `analyze`     : Analyze JS files for endpoints and secrets
 - `fuzz`        : Fuzz for additional JS files using ffuf
 - `report`      : Generate comprehensive statistics report
+- `github`      : Search GitHub repositories for secrets and useful data
 
 You can chain commands, e.g.:
 ```sh
@@ -100,97 +106,6 @@ python -m mjsrecon.core download --independent --input live_urls.txt
 # Analyze JS files from a directory
 python -m mjsrecon.core analyze --independent --input js_files/
 
-# Deduplicate URLs from a file
-python -m mjsrecon.core deduplicate --independent --input all_urls.txt
-
-# Fuzz URLs from a file
-python -m mjsrecon.core fuzz --independent --input urls.txt --fuzz-mode wordlist --fuzz-wordlist wordlist.txt
-
-# Generate report for a directory
-python -m mjsrecon.core report --independent --input analysis_results/
-```
-
-### **Options**
-
-- `-t, --targets`    : Comma-separated list of target domains (e.g. `example.com,example.org`)
-- `-o, --output`     : Output directory (default: `./output`)
-- `-d, --depth`      : Katana crawl depth (default: 5)
-- `--input`          : Input file/directory for the current command (overrides default)
-- `--independent`    : Run module independently with custom input files
-
-#### **Fuzzing Options**
-
-- `--fuzz-mode`        : Fuzzing mode: `wordlist`, `permutation`, `both`, or `off` (default: `off`)
-- `--fuzz-wordlist`    : Custom wordlist file for fuzzing (required if fuzz-mode is wordlist or both)
-- `--fuzz-extensions`  : File extensions to fuzz (default: `js`)
-- `--fuzz-status-codes`: HTTP status codes to consider valid (default: `200,403,401`)
-- `--fuzz-threads`     : Number of concurrent fuzzing threads (default: `10`)
-- `--fuzz-timeout`     : Timeout for each fuzzing request in seconds (default: `30`)
-- `--fuzz-no-timeout`  : Disable timeout for ffuf (useful for large wordlists)
-
----
-
-## Workflow
-
-### 1. **Gather**
-Finds all possible JS URLs for each target using waybackurls, gau, and katana.
-
-### 2. **Verify**
-Checks which JS URLs are live using requests library.
-
-### 3. **Deduplicate**
-Removes duplicate JS URLs using HTTP headers (ETag, Content-Length, Last-Modified).
-
-### 4. **Download**
-Downloads all live JS files, deduplicating by content hash.
-
-### 5. **Analyze**
-Analyzes all downloaded JS files for endpoints and secrets using jsluice, SecretFinder, LinkFinder, and trufflehog.
-
-### 6. **Fuzz**
-Fuzzes for additional JS files using ffuf with multiple modes:
-- **Wordlist Mode**: Uses custom wordlist to discover JS files
-- **Permutation Mode**: Generates permutations from existing JS filenames
-- **Both Mode**: Combines wordlist and permutation fuzzing
-- **Off Mode**: Skips fuzzing entirely
-
-### 7. **Report**
-Generates comprehensive statistics and findings report.
-
----
-
-## Example Usage
-
-**Full workflow:**
-```sh
-python -m mjsrecon.core gather verify deduplicate download analyze fuzz report --targets example.com
-```
-
-**Step-by-step:**
-```sh
-python -m mjsrecon.core gather --targets example.com
-python -m mjsrecon.core verify --targets example.com
-python -m mjsrecon.core deduplicate --targets example.com
-python -m mjsrecon.core download --targets example.com
-python -m mjsrecon.core analyze --targets example.com
-python -m mjsrecon.core fuzz --targets example.com --fuzz-mode both --fuzz-wordlist wordlist.txt
-python -m mjsrecon.core report --targets example.com
-```
-
-**Independent module usage:**
-```sh
-# Gather JS URLs for targets
-python -m mjsrecon.core gather --independent --input targets.txt
-
-# Verify URLs from a custom file
-python -m mjsrecon.core verify --independent --input urls.txt
-
-# Download JS files from verified URLs
-python -m mjsrecon.core download --independent --input live_urls.txt
-
-# Analyze JS files from a directory
-python -m mjsrecon.core analyze --independent --input js_files/
-
 # Fuzz with wordlist only
 python -m mjsrecon.core fuzz --independent --input urls.txt --fuzz-mode wordlist --fuzz-wordlist wordlist.txt
 
@@ -202,6 +117,9 @@ python -m mjsrecon.core fuzz --independent --input urls.txt --fuzz-mode both --f
 
 # Generate report for analysis results
 python -m mjsrecon.core report --independent --input analysis_results/
+
+# GitHub reconnaissance for organizations/users
+python -m mjsrecon.core github --independent --input targets.txt
 ```
 
 **Advanced Fuzzing Examples:**
@@ -225,10 +143,97 @@ python -m mjsrecon.core fuzz --targets example.com --fuzz-mode both --fuzz-wordl
 python -m mjsrecon.core fuzz --independent --input urls.txt --fuzz-mode wordlist --fuzz-wordlist wordlist.txt --output fuzzing_results/
 ```
 
+**GitHub Reconnaissance Examples:**
+```sh
+# Basic GitHub reconnaissance for a company
+python -m mjsrecon.core github --targets company-name
+
+# GitHub reconnaissance with custom token
+python -m mjsrecon.core github --targets company-name --github-token your_token_here
+
+# Limit repositories to analyze
+python -m mjsrecon.core github --targets company-name --github-max-repos 5
+
+# Use specific scanning tools only
+python -m mjsrecon.core github --targets company-name --github-scan-tools trufflehog
+
+# Skip cloning repositories (API-only mode)
+python -m mjsrecon.core github --targets company-name --github-skip-clone
+
+# Multiple targets
+python -m mjsrecon.core github --targets company1,company2,username1
+
+# Independent mode with custom input
+python -m mjsrecon.core github --independent --input github_targets.txt
+```
+
 **Using a custom input file for a step:**
 ```sh
 python -m mjsrecon.core verify --input my_js_urls.txt --targets example.com
 ```
+
+---
+
+## GitHub Reconnaissance Module
+
+The GitHub reconnaissance module (`github`) is a powerful tool for discovering secrets, sensitive data, and useful information in GitHub repositories related to your targets.
+
+### Features
+
+- **Repository Discovery**: Search for repositories by organization, user, or keywords
+- **Secret Scanning**: Use multiple tools (TruffleHog, GitLeaks, custom patterns)
+- **Organization Analysis**: Get detailed information about GitHub organizations
+- **User Analysis**: Analyze GitHub users and their repositories
+- **Content Analysis**: Categorize and analyze repository content
+- **Commit History**: Extract recent commit information
+- **Issues & PRs**: Search for issues and pull requests
+- **Rate Limiting**: Automatic handling of GitHub API rate limits
+- **Comprehensive Reporting**: Generate detailed reports in multiple formats
+
+### Secret Patterns Detected
+
+- **API Keys**: Various API key formats (32-45 characters)
+- **AWS Keys**: Access keys and secret keys
+- **Google Keys**: API keys and OAuth tokens
+- **Database Connections**: MySQL, PostgreSQL, MongoDB connection strings
+- **Private Keys**: RSA, DSA, EC private keys
+- **Passwords**: Hardcoded passwords in configuration files
+
+### Tools Used
+
+- **TruffleHog**: Advanced secret scanning with entropy analysis
+- **GitLeaks**: Comprehensive secret detection with rule-based scanning
+- **Custom Patterns**: Regex-based scanning for specific patterns
+- **Git Commands**: For repository cloning and commit analysis
+
+### Output Structure
+
+```
+output/
+└── github_recon/
+    ├── repositories.json          # All discovered repositories
+    ├── secrets_found.json         # All secrets found
+    ├── useful_data.json           # Repository analysis data
+    ├── organizations.json         # Organization information
+    ├── users.json                 # User information
+    ├── summary_report.md          # Human-readable summary
+    └── cloned_repos/              # Temporarily cloned repositories
+```
+
+### Configuration Options
+
+- `--github-token`: GitHub API token for higher rate limits
+- `--github-max-repos`: Maximum repositories to analyze per target (default: 10)
+- `--github-scan-tools`: Secret scanning tools to use (trufflehog, gitleaks, custom, all)
+- `--github-skip-clone`: Skip cloning repositories (API-only mode)
+
+### Best Practices
+
+1. **Use GitHub Token**: Set up a GitHub personal access token for higher rate limits
+2. **Limit Scope**: Use `--github-max-repos` to control analysis scope
+3. **Tool Selection**: Choose specific tools based on your needs
+4. **Cleanup**: The module automatically cleans up cloned repositories
+5. **Rate Limiting**: The module handles rate limits automatically
 
 ---
 
@@ -247,6 +252,13 @@ Each step writes its results to files and directories as defined in `mjsrecon/ut
 - `fuzzing_summary.json`: Detailed statistics and findings
 - Separate files for wordlist and permutation results
 
+**GitHub reconnaissance output:**
+- `github_recon/`: All GitHub reconnaissance results
+- `repositories.json`: Discovered repositories with metadata
+- `secrets_found.json`: All secrets found with details
+- `useful_data.json`: Repository content analysis
+- `summary_report.md`: Human-readable summary report
+
 ---
 
 ## Extending
@@ -255,6 +267,7 @@ Each step writes its results to files and directories as defined in `mjsrecon/ut
 - Replace or extend any step by editing the corresponding module in `mjsrecon/`.
 - Each module supports both integrated and independent operation modes.
 - Customize fuzzing behavior by modifying ffuf parameters and wordlists.
+- Extend GitHub reconnaissance with additional secret patterns or tools.
 
 ---
 
@@ -275,6 +288,12 @@ Each step writes its results to files and directories as defined in `mjsrecon/ut
    - Check that wordlist file exists and is readable
    - Verify target URLs are accessible
    - Adjust `--fuzz-threads` and `--fuzz-timeout` for network conditions
+
+6. **GitHub reconnaissance errors**:
+   - Ensure TruffleHog and GitLeaks are installed and in PATH
+   - Check GitHub API rate limits (use token for higher limits)
+   - Verify target names are valid GitHub organizations/users
+   - Ensure sufficient disk space for repository cloning
 
 **Debug Mode:**
 Enable debug logging by setting the log level in the Logger class.
