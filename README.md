@@ -126,6 +126,7 @@ python -m mjsrecon.core report --independent --input analysis_results/
 - `--fuzz-status-codes`: HTTP status codes to consider valid (default: `200,403,401`)
 - `--fuzz-threads`     : Number of concurrent fuzzing threads (default: `10`)
 - `--fuzz-timeout`     : Timeout for each fuzzing request in seconds (default: `30`)
+- `--fuzz-no-timeout`  : Disable timeout for ffuf (useful for large wordlists)
 
 ---
 
@@ -213,6 +214,12 @@ python -m mjsrecon.core fuzz --targets example.com --fuzz-mode permutation --fuz
 
 # Both modes with custom status codes
 python -m mjsrecon.core fuzz --targets example.com --fuzz-mode both --fuzz-wordlist wordlist.txt --fuzz-status-codes 200,403,401,404
+
+# Fuzzing with large wordlists (no timeout)
+python -m mjsrecon.core fuzz --targets example.com --fuzz-mode wordlist --fuzz-wordlist large_wordlist.txt --fuzz-no-timeout
+
+# High-performance fuzzing with custom settings
+python -m mjsrecon.core fuzz --targets example.com --fuzz-mode both --fuzz-wordlist wordlist.txt --fuzz-threads 50 --fuzz-timeout 120 --fuzz-no-timeout
 
 # Independent fuzzing with custom output
 python -m mjsrecon.core fuzz --independent --input urls.txt --fuzz-mode wordlist --fuzz-wordlist wordlist.txt --output fuzzing_results/

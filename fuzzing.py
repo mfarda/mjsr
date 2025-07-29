@@ -121,10 +121,17 @@ def execute_fuzzing_workflow(target, url_list, ffuf_results_dir, args, config, l
     # Execute fuzzing for each directory
     with tqdm(total=len(url_groups), desc=f"[{target}] Fuzzing directories", unit="dir") as pbar:
         for dir_path, base_url in url_groups.items():
-            execute_fuzzing_for_directory(
-                target, base_url, dir_path, ffuf_results_dir,
-                args, permutation_wordlist, logger
-            )
+            try:
+                execute_fuzzing_for_directory(
+                    target, base_url, dir_path, ffuf_results_dir,
+                    args, permutation_wordlist, logger
+                )
+            except KeyboardInterrupt:
+                logger.log('WARN', f"[{target}] Fuzzing interrupted by user")
+                break
+            except Exception as e:
+                logger.log('ERROR', f"[{target}] Error fuzzing directory {dir_path}: {str(e)}")
+                continue
             pbar.update(1)
     
     return True
@@ -165,20 +172,54 @@ def run_ffuf_command(target, fuzz_url, wordlist, output_file, fuzz_type, args, l
         "-t", str(args.fuzz_threads),
         "-timeout", str(args.fuzz_timeout),
         "-of", "json",
-        "-o", str(output_file)
+        "-o", str(output_file),
+        "-v"  # Add verbose output for better debugging
     ]
     
     logger.log('INFO', f"[{target}] Running ffuf {fuzz_type} on {fuzz_url}")
     logger.log('DEBUG', f"[{target}] Command: {' '.join(cmd)}")
     
-    exit_code, stdout, stderr = run_command(cmd, timeout=args.fuzz_timeout * 2)
+    # Calculate timeout based on wordlist size and threads
+    if args.fuzz_no_timeout:
+        timeout = None  # No timeout
+        logger.log('INFO', f"[{target}] Running ffuf without timeout (--fuzz-no-timeout enabled)")
+    else:
+        wordlist_size = get_wordlist_size(wordlist)
+        timeout = calculate_ffuf_timeout(wordlist_size, args.fuzz_threads, args.fuzz_timeout)
+        logger.log('DEBUG', f"[{target}] Wordlist size: {wordlist_size}, Estimated timeout: {timeout}s")
+    
+    exit_code, stdout, stderr = run_command(cmd, timeout=timeout)
     
     if exit_code == 0 and output_file.exists() and output_file.stat().st_size > 0:
         logger.log('SUCCESS', f"[{target}] ffuf {fuzz_type} completed successfully")
         return True
+    elif exit_code == 0 and output_file.exists():
+        logger.log('WARN', f"[{target}] ffuf {fuzz_type} completed but no results found")
+        return True
     else:
-        logger.log('ERROR', f"[{target}] ffuf {fuzz_type} failed: {stderr}")
+        logger.log('ERROR', f"[{target}] ffuf {fuzz_type} failed (exit code: {exit_code}): {stderr}")
         return False
+
+def get_wordlist_size(wordlist_path):
+    """Get the number of lines in the wordlist file"""
+    try:
+        with open(wordlist_path, 'r') as f:
+            return sum(1 for line in f if line.strip())
+    except:
+        return 1000  # Default estimate
+
+def calculate_ffuf_timeout(wordlist_size, threads, per_request_timeout):
+    """Calculate a reasonable timeout for ffuf based on wordlist size and threads"""
+    # Base calculation: (wordlist_size / threads) * per_request_timeout * 1.5 (buffer)
+    base_timeout = (wordlist_size / threads) * per_request_timeout * 1.5
+    
+    # Add minimum and maximum bounds
+    min_timeout = 60  # 1 minute minimum
+    max_timeout = 3600  # 1 hour maximum
+    
+    timeout = max(min_timeout, min(max_timeout, base_timeout))
+    
+    return int(timeout)
 
 def generate_permutation_wordlist(target, js_filenames, ffuf_results_dir, logger):
     """Generate permutation wordlist from JS filenames"""
