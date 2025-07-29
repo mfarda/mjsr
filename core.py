@@ -27,6 +27,10 @@ def main():
     parser.add_argument('--fuzz-timeout', type=int, default=30, help='Timeout for each fuzzing request in seconds (default: 30)')
     parser.add_argument('--fuzz-no-timeout', action='store_true', help='Disable timeout for ffuf (useful for large wordlists)')
     
+    # Gather specific arguments
+    parser.add_argument('--gather-mode', choices=['g', 'w', 'k', 'gw', 'gk', 'wk', 'gwk'], default='gwk',
+                       help='Gather mode: g=gau, w=wayback, k=katana, gw=gau+wayback, gk=gau+katana, wk=wayback+katana, gwk=all (default: gwk)')
+    
     # GitHub reconnaissance specific arguments
     parser.add_argument('--github-token', help='GitHub API token for higher rate limits')
     parser.add_argument('--github-max-repos', type=int, default=10, help='Maximum number of repositories to analyze per target (default: 10)')
