@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 from pathlib import Path
+from tqdm import tqdm
 from .utils import CONFIG, ensure_dir
 import re
 import hashlib
@@ -42,11 +43,18 @@ async def run(args, config, logger):
         if not urls:
             logger.log('WARN', f"[{target}] No live JS URLs found.")
             continue
+        
+        logger.log('INFO', f"[{target}] Found {len(urls)} JS URLs to download")
+        
         hash_set = set()
         hash_lock = asyncio.Lock()
         semaphore = asyncio.Semaphore(CONFIG['max_concurrent_downloads'])
+        downloaded_count = 0
+        skipped_count = 0
+        failed_count = 0
 
-        async def download_file(session, url, index, total):
+        async def download_file(session, url, pbar):
+            nonlocal downloaded_count, skipped_count, failed_count
             retries = 3
             async with semaphore:
                 for attempt in range(retries):
@@ -55,36 +63,67 @@ async def run(args, config, logger):
                             if response.status == 200:
                                 content = await response.read()
                                 file_hash = hashlib.sha256(content).hexdigest()
-                                logger.log('DEBUG', f"[{target}] [{index+1}/{total}] Hash: {file_hash[:16]}... for URL: {url}")
+                                
                                 async with hash_lock:
                                     if file_hash in hash_set:
-                                        logger.log('INFO', f"[{target}] [{index+1}/{total}] Duplicate content skipped: {url} (hash_set size: {len(hash_set)})")
+                                        skipped_count += 1
+                                        pbar.set_postfix({
+                                            'Downloaded': downloaded_count,
+                                            'Skipped': skipped_count,
+                                            'Failed': failed_count
+                                        })
                                         return False
                                     hash_set.add(file_hash)
-                                    logger.log('DEBUG', f"[{target}] [{index+1}/{total}] Added hash to set. New size: {len(hash_set)}")
+                                
                                 base_filename = sanitize_filename(url)
                                 filename = f"{base_filename}__{file_hash}.js"
                                 file_path = js_files_dir / filename
                                 if file_path.exists():
-                                    logger.log('INFO', f"[{target}] [{index+1}/{total}] Duplicate filename skipped: {url}")
+                                    skipped_count += 1
+                                    pbar.set_postfix({
+                                        'Downloaded': downloaded_count,
+                                        'Skipped': skipped_count,
+                                        'Failed': failed_count
+                                    })
                                     return False
+                                
                                 with open(file_path, 'wb') as f:
                                     f.write(content)
-                                logger.log('SUCCESS', f"[{target}] [{index+1}/{total}] Downloaded: {filename}")
+                                
+                                downloaded_count += 1
+                                pbar.set_postfix({
+                                    'Downloaded': downloaded_count,
+                                    'Skipped': skipped_count,
+                                    'Failed': failed_count
+                                })
                                 return True
                             else:
-                                logger.log('ERROR', f"[{target}] [{index+1}/{total}] Failed: {url} (status: {response.status})")
+                                failed_count += 1
+                                pbar.set_postfix({
+                                    'Downloaded': downloaded_count,
+                                    'Skipped': skipped_count,
+                                    'Failed': failed_count
+                                })
                                 return False
                     except Exception as e:
                         if attempt < retries - 1:
                             await asyncio.sleep(2)
-                            logger.log('WARN', f"[{target}] [{index+1}/{total}] Retry {attempt+1} for {url}")
                         else:
-                            logger.log('ERROR', f"[{target}] [{index+1}/{total}] Failed: {url} - {str(e)}")
+                            failed_count += 1
+                            pbar.set_postfix({
+                                'Downloaded': downloaded_count,
+                                'Skipped': skipped_count,
+                                'Failed': failed_count
+                            })
                             return False
+
         async with aiohttp.ClientSession() as session:
-            tasks = [download_file(session, url, i, len(urls)) for i, url in enumerate(urls)]
-            await asyncio.gather(*tasks)
+            with tqdm(total=len(urls), desc=f"[{target}] Downloading JS files", unit="file") as pbar:
+                tasks = [download_file(session, url, pbar) for url in urls]
+                await asyncio.gather(*tasks)
+                pbar.update(len(urls))  # Ensure progress bar completes
+        
+        logger.log('SUCCESS', f"[{target}] Download complete: {downloaded_count} downloaded, {skipped_count} skipped, {failed_count} failed")
 
 async def run_independent(args, config, logger):
     """Run download module independently with custom input file"""
@@ -105,7 +144,7 @@ async def run_independent(args, config, logger):
     logger.log('INFO', f"Downloading JS files from: {input_file}")
     logger.log('INFO', f"Files will be saved to: {output_dir}")
     
-    # Read URLs
+    # Read URLs from input file
     with open(input_file, 'r') as f:
         urls = [line.strip().split()[0] for line in f if line.strip()]
     
@@ -113,15 +152,17 @@ async def run_independent(args, config, logger):
         logger.log('WARN', "No URLs found to download")
         return False
     
-    logger.log('INFO', f"Downloading {len(urls)} JS files...")
+    logger.log('INFO', f"Found {len(urls)} JS URLs to download")
     
     hash_set = set()
     hash_lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(CONFIG['max_concurrent_downloads'])
     downloaded_count = 0
+    skipped_count = 0
+    failed_count = 0
 
-    async def download_file(session, url, index, total):
-        nonlocal downloaded_count
+    async def download_file(session, url, pbar):
+        nonlocal downloaded_count, skipped_count, failed_count
         retries = 3
         async with semaphore:
             for attempt in range(retries):
@@ -133,40 +174,64 @@ async def run_independent(args, config, logger):
                             
                             async with hash_lock:
                                 if file_hash in hash_set:
-                                    logger.log('INFO', f"[{index+1}/{total}] Duplicate content skipped: {url}")
+                                    skipped_count += 1
+                                    pbar.set_postfix({
+                                        'Downloaded': downloaded_count,
+                                        'Skipped': skipped_count,
+                                        'Failed': failed_count
+                                    })
                                     return False
                                 hash_set.add(file_hash)
                             
                             base_filename = sanitize_filename(url)
                             filename = f"{base_filename}__{file_hash}.js"
                             file_path = output_dir / filename
-                            
                             if file_path.exists():
-                                logger.log('INFO', f"[{index+1}/{total}] Duplicate filename skipped: {url}")
+                                skipped_count += 1
+                                pbar.set_postfix({
+                                    'Downloaded': downloaded_count,
+                                    'Skipped': skipped_count,
+                                    'Failed': failed_count
+                                })
                                 return False
                             
                             with open(file_path, 'wb') as f:
                                 f.write(content)
                             
                             downloaded_count += 1
-                            logger.log('SUCCESS', f"[{index+1}/{total}] Downloaded: {filename}")
+                            pbar.set_postfix({
+                                'Downloaded': downloaded_count,
+                                'Skipped': skipped_count,
+                                'Failed': failed_count
+                            })
                             return True
                         else:
-                            logger.log('ERROR', f"[{index+1}/{total}] Failed: {url} (status: {response.status})")
+                            failed_count += 1
+                            pbar.set_postfix({
+                                'Downloaded': downloaded_count,
+                                'Skipped': skipped_count,
+                                'Failed': failed_count
+                            })
                             return False
                 except Exception as e:
                     if attempt < retries - 1:
                         await asyncio.sleep(2)
-                        logger.log('WARN', f"[{index+1}/{total}] Retry {attempt+1} for {url}")
                     else:
-                        logger.log('ERROR', f"[{index+1}/{total}] Failed: {url} - {str(e)}")
+                        failed_count += 1
+                        pbar.set_postfix({
+                            'Downloaded': downloaded_count,
+                            'Skipped': skipped_count,
+                            'Failed': failed_count
+                        })
                         return False
-    
+
     async with aiohttp.ClientSession() as session:
-        tasks = [download_file(session, url, i, len(urls)) for i, url in enumerate(urls)]
-        await asyncio.gather(*tasks)
+        with tqdm(total=len(urls), desc="Downloading JS files", unit="file") as pbar:
+            tasks = [download_file(session, url, pbar) for url in urls]
+            await asyncio.gather(*tasks)
+            pbar.update(len(urls))  # Ensure progress bar completes
     
-    logger.log('SUCCESS', f"Downloaded {downloaded_count} unique JS files out of {len(urls)} URLs")
+    logger.log('SUCCESS', f"Download complete: {downloaded_count} downloaded, {skipped_count} skipped, {failed_count} failed")
     logger.log('INFO', f"Files saved to: {output_dir}")
     
     return downloaded_count > 0

@@ -57,16 +57,30 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
     """Run fuzzing for a specific target in chain mode"""
     logger.log('INFO', f"[{target}] Starting fuzzing workflow...")
     
-    # Step 1: Get live JS files from input
-    live_js_urls = read_js_urls_from_file(url_list_file)
-    if not live_js_urls:
-        logger.log('ERROR', f"[{target}] No live JS URLs found in {url_list_file}")
-        return False
+    # Step 1: Get JS files from downloaded files or live URLs
+    js_urls = []
     
-    logger.log('INFO', f"[{target}] Found {len(live_js_urls)} live JS URLs")
+    # First try to get URLs from downloaded JS files
+    js_files_dir = target_dir / CONFIG['dirs']['js_files']
+    if js_files_dir.exists():
+        js_files = list(js_files_dir.glob("*.js"))
+        if js_files:
+            logger.log('INFO', f"[{target}] Found {len(js_files)} downloaded JS files, extracting URLs...")
+            js_urls = extract_urls_from_downloaded_js_files(js_files, logger)
+            if js_urls:
+                logger.log('INFO', f"[{target}] Extracted {len(js_urls)} URLs from downloaded JS files")
     
-    # Step 2: Get unique paths from live JS files
-    unique_paths = get_unique_paths_from_urls(live_js_urls)
+    # If no URLs from downloaded files, fall back to live JS URLs
+    if not js_urls:
+        logger.log('INFO', f"[{target}] No URLs from downloaded files, using live JS URLs...")
+        js_urls = read_js_urls_from_file(url_list_file)
+        if not js_urls:
+            logger.log('ERROR', f"[{target}] No live JS URLs found in {url_list_file}")
+            return False
+        logger.log('INFO', f"[{target}] Found {len(js_urls)} live JS URLs")
+    
+    # Step 2: Get unique paths from JS URLs
+    unique_paths = get_unique_paths_from_urls(js_urls)
     logger.log('INFO', f"[{target}] Found {len(unique_paths)} unique paths to fuzz")
     
     # Create ffuf results directory
@@ -74,26 +88,39 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
     ensure_dir(ffuf_results_dir)
     
     # Run fuzzing based on mode
-    success = execute_fuzzing_by_mode(target, live_js_urls, unique_paths, ffuf_results_dir, args, config, logger)
+    success = execute_fuzzing_by_mode(target, js_urls, unique_paths, ffuf_results_dir, args, config, logger)
     
     if success:
         # Save and analyze results
-        save_fuzzing_results(target, target_dir, ffuf_results_dir, live_js_urls, logger)
+        save_fuzzing_results(target, target_dir, ffuf_results_dir, js_urls, logger)
     
     return success
 
 def run_fuzzing_independent(input_file, output_dir, args, config, logger):
     """Run fuzzing independently with custom input file"""
-    # Step 1: Get live JS files from input
-    live_js_urls = read_js_urls_from_file(input_file)
-    if not live_js_urls:
-        logger.log('ERROR', f"No live JS URLs found in {input_file}")
-        return False
+    # Step 1: Get JS URLs from input (could be downloaded files directory or URL list)
+    input_path = Path(input_file)
+    js_urls = []
     
-    logger.log('INFO', f"Found {len(live_js_urls)} live JS URLs")
+    if input_path.is_dir():
+        # Input is a directory of downloaded JS files
+        js_files = list(input_path.glob("*.js"))
+        if js_files:
+            logger.log('INFO', f"Found {len(js_files)} downloaded JS files, extracting URLs...")
+            js_urls = extract_urls_from_downloaded_js_files(js_files, logger)
+            if js_urls:
+                logger.log('INFO', f"Extracted {len(js_urls)} URLs from downloaded JS files")
     
-    # Step 2: Get unique paths from live JS files
-    unique_paths = get_unique_paths_from_urls(live_js_urls)
+    if not js_urls:
+        # Input is a URL list file
+        js_urls = read_js_urls_from_file(input_file)
+        if not js_urls:
+            logger.log('ERROR', f"No JS URLs found in {input_file}")
+            return False
+        logger.log('INFO', f"Found {len(js_urls)} JS URLs from file")
+    
+    # Step 2: Get unique paths from JS URLs
+    unique_paths = get_unique_paths_from_urls(js_urls)
     logger.log('INFO', f"Found {len(unique_paths)} unique paths to fuzz")
     
     # Create ffuf results directory
@@ -101,11 +128,11 @@ def run_fuzzing_independent(input_file, output_dir, args, config, logger):
     ensure_dir(ffuf_results_dir)
     
     # Run fuzzing based on mode
-    success = execute_fuzzing_by_mode("independent", live_js_urls, unique_paths, ffuf_results_dir, args, config, logger)
+    success = execute_fuzzing_by_mode("independent", js_urls, unique_paths, ffuf_results_dir, args, config, logger)
     
     if success:
         # Save results for independent mode
-        save_independent_fuzzing_results(input_file, output_dir, ffuf_results_dir, live_js_urls, logger)
+        save_independent_fuzzing_results(input_file, output_dir, ffuf_results_dir, js_urls, logger)
     
     return success
 
@@ -542,3 +569,31 @@ def run_command(cmd, timeout=CONFIG['timeouts']['command']):
         return 1, "", f"Command timed out after {timeout} seconds"
     except Exception as e:
         return 1, "", str(e)
+
+def extract_urls_from_downloaded_js_files(js_files, logger):
+    """Extract URLs from downloaded JS files using jsluice"""
+    extracted_urls = set()
+    
+    logger.log('INFO', f"Extracting URLs from {len(js_files)} JS files...")
+    
+    with tqdm(total=len(js_files), desc="Extracting URLs", unit="file") as pbar:
+        for js_file in js_files:
+            try:
+                # Use jsluice to extract URLs from JS file
+                exit_code, stdout, stderr = run_command(["jsluice", "urls", str(js_file)])
+                
+                if exit_code == 0 and stdout.strip():
+                    try:
+                        urls_data = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+                        for url_data in urls_data:
+                            if 'url' in url_data and url_data['url'].endswith('.js'):
+                                extracted_urls.add(url_data['url'])
+                    except json.JSONDecodeError:
+                        continue
+            except Exception as e:
+                logger.log('DEBUG', f"Error extracting URLs from {js_file.name}: {str(e)}")
+                continue
+            pbar.update(1)
+    
+    logger.log('SUCCESS', f"Extracted {len(extracted_urls)} unique JS URLs from downloaded files")
+    return list(extracted_urls)

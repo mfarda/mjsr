@@ -18,20 +18,43 @@ def run(args, config, logger):
         if not js_files:
             logger.log('ERROR', f"[{target}] No JS files found for analysis.")
             continue
+        
+        logger.log('INFO', f"[{target}] Found {len(js_files)} JS files to analyze")
+        
         max_workers = CONFIG['analysis_threads']
         results_dir = target_dir / CONFIG['dirs']['results']
         for subdir in CONFIG['results_dirs']:
             ensure_dir(results_dir / subdir)
-        with tqdm(total=len(js_files), desc=f"[{target}] Analyzing JS", unit="file") as pbar:
+        
+        processed_count = 0
+        failed_count = 0
+        
+        def analyze_file(js_file, pbar):
+            nonlocal processed_count, failed_count
+            try:
+                analyze_js_file(target, target_dir, js_file, logger)
+                processed_count += 1
+                pbar.set_postfix({
+                    'Processed': processed_count,
+                    'Failed': failed_count
+                })
+                return True
+            except Exception as e:
+                failed_count += 1
+                pbar.set_postfix({
+                    'Processed': processed_count,
+                    'Failed': failed_count
+                })
+                return False
+        
+        with tqdm(total=len(js_files), desc=f"[{target}] Analyzing JS files", unit="file") as pbar:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(analyze_js_file, target, target_dir, js_file, logger) for js_file in js_files]
-                for i, future in enumerate(concurrent.futures.as_completed(futures), 1):
-                    try:
-                        future.result()
-                        pbar.update(1)
-                        logger.log('INFO', f"[{target}] [{i}/{len(js_files)}] Processed")
-                    except Exception as e:
-                        logger.log('ERROR', f"[{target}] Error processing file: {str(e)}")
+                futures = [executor.submit(analyze_file, js_file, pbar) for js_file in js_files]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+        
+        logger.log('SUCCESS', f"[{target}] Analysis complete: {processed_count} processed, {failed_count} failed")
 
 def run_independent(args, config, logger):
     """Run analyze module independently with custom input directory"""
@@ -70,19 +93,36 @@ def run_independent(args, config, logger):
         ensure_dir(output_dir / subdir)
     
     max_workers = CONFIG['analysis_threads']
+    processed_count = 0
+    failed_count = 0
     
-    with tqdm(total=len(js_files), desc="Analyzing JS", unit="file") as pbar:
+    def analyze_file(js_file, pbar):
+        nonlocal processed_count, failed_count
+        try:
+            analyze_js_file_independent(input_dir, output_dir, js_file, logger)
+            processed_count += 1
+            pbar.set_postfix({
+                'Processed': processed_count,
+                'Failed': failed_count
+            })
+            return True
+        except Exception as e:
+            failed_count += 1
+            pbar.set_postfix({
+                'Processed': processed_count,
+                'Failed': failed_count
+            })
+            return False
+    
+    with tqdm(total=len(js_files), desc="Analyzing JS files", unit="file") as pbar:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(analyze_js_file_independent, input_dir, output_dir, js_file, logger) for js_file in js_files]
-            for i, future in enumerate(concurrent.futures.as_completed(futures), 1):
-                try:
-                    future.result()
-                    pbar.update(1)
-                    logger.log('INFO', f"[{i}/{len(js_files)}] Processed")
-                except Exception as e:
-                    logger.log('ERROR', f"Error processing file: {str(e)}")
+            futures = [executor.submit(analyze_file, js_file, pbar) for js_file in js_files]
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
+                pbar.update(1)
     
-    logger.log('SUCCESS', f"Analysis complete! Results saved to: {output_dir}")
+    logger.log('SUCCESS', f"Analysis complete: {processed_count} processed, {failed_count} failed")
+    logger.log('INFO', f"Results saved to: {output_dir}")
     return True
 
 def analyze_js_file(target, target_dir, js_file, logger):
