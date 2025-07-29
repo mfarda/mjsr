@@ -17,9 +17,9 @@ CONFIG = {
         'analysis': 30
     },
     'excluded_extensions': {'.css', '.png', '.jpg', '.jpeg', '.svg', '.ico', '.gif', '.woff', '.woff2', '.swf'},
+    
     'results_dirs': [
-        "jsluice", "secretfinder", "linkfinder", "trufflehog",
-        "endpoints", "secrets_filtered", "secrets_validated"
+        "jsluice", "secretfinder", "linkfinder", "trufflehog"        
     ],
     'prefixes': [
         '', 'app', 'lib', 'test', 'spec', 'src', 'dist', 'build', 'vendor', 'node', 'client', 'server', 'common',
