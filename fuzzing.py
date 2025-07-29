@@ -58,32 +58,43 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
     """Run fuzzing for a specific target in chain mode"""
     logger.log('INFO', f"[{target}] Starting fuzzing workflow...")
     
-    # Step 1: Get JS files from downloaded files or live URLs
+    # Step 1: Get JS files from deduplicated file or downloaded files or live URLs
     js_urls = []
     
-    # First try to get URLs from downloaded JS files
-    js_files_dir = target_dir / CONFIG['dirs']['js_files']
-    if js_files_dir.exists():
-        js_files = list(js_files_dir.glob("*.js"))
-        if js_files:
-            logger.log('INFO', f"[{target}] Found {len(js_files)} downloaded JS files, extracting URLs...")
-            extracted_urls = extract_urls_from_downloaded_js_files(js_files, logger)
-            if extracted_urls:
-                # Check if extracted URLs are suitable for fuzzing (have absolute URLs)
-                suitable_urls = [url for url in extracted_urls if url.startswith(('http://', 'https://'))]
-                if suitable_urls:
-                    js_urls = suitable_urls
-                    logger.log('INFO', f"[{target}] Using {len(js_urls)} absolute URLs from downloaded JS files")
-                    logger.log('INFO', f"[{target}] Total extracted URLs: {len(extracted_urls)}, Absolute URLs: {len(js_urls)}")
-                    logger.log('DEBUG', f"[{target}] Absolute URLs: {js_urls}")
-                    logger.log('DEBUG', f"[{target}] Filtered out URLs: {[url for url in extracted_urls if not url.startswith(('http://', 'https://'))]}")
-                else:
-                    logger.log('INFO', f"[{target}] No absolute URLs found in downloaded files, will use live URLs")
-                    logger.log('INFO', f"[{target}] Total extracted URLs: {len(extracted_urls)}, Absolute URLs: 0")
-            else:
-                logger.log('INFO', f"[{target}] No URLs extracted from downloaded files, will use live URLs")
+    # First try to use deduplicated JS file
+    deduplicated_file = target_dir / CONFIG['files']['deduplicated_js']
+    if deduplicated_file.exists():
+        logger.log('INFO', f"[{target}] Using deduplicated JS file as primary input...")
+        js_urls = read_js_urls_from_file(deduplicated_file)
+        if js_urls:
+            logger.log('INFO', f"[{target}] Found {len(js_urls)} URLs from deduplicated file")
+        else:
+            logger.log('WARN', f"[{target}] Deduplicated file is empty, trying downloaded files...")
     
-    # If no suitable URLs from downloaded files, fall back to live JS URLs
+    # If no URLs from deduplicated file, try downloaded JS files
+    if not js_urls:
+        js_files_dir = target_dir / CONFIG['dirs']['js_files']
+        if js_files_dir.exists():
+            js_files = list(js_files_dir.glob("*.js"))
+            if js_files:
+                logger.log('INFO', f"[{target}] Found {len(js_files)} downloaded JS files, extracting URLs...")
+                extracted_urls = extract_urls_from_downloaded_js_files(js_files, logger)
+                if extracted_urls:
+                    # Check if extracted URLs are suitable for fuzzing (have absolute URLs)
+                    suitable_urls = [url for url in extracted_urls if url.startswith(('http://', 'https://'))]
+                    if suitable_urls:
+                        js_urls = suitable_urls
+                        logger.log('INFO', f"[{target}] Using {len(js_urls)} absolute URLs from downloaded JS files")
+                        logger.log('INFO', f"[{target}] Total extracted URLs: {len(extracted_urls)}, Absolute URLs: {len(js_urls)}")
+                        logger.log('DEBUG', f"[{target}] Absolute URLs: {js_urls}")
+                        logger.log('DEBUG', f"[{target}] Filtered out URLs: {[url for url in extracted_urls if not url.startswith(('http://', 'https://'))]}")
+                    else:
+                        logger.log('INFO', f"[{target}] No absolute URLs found in downloaded files, will use live URLs")
+                        logger.log('INFO', f"[{target}] Total extracted URLs: {len(extracted_urls)}, Absolute URLs: 0")
+                else:
+                    logger.log('INFO', f"[{target}] No URLs extracted from downloaded files, will use live URLs")
+    
+    # If no suitable URLs from deduplicated or downloaded files, fall back to live JS URLs
     if not js_urls:
         logger.log('INFO', f"[{target}] Using live JS URLs from previous steps...")
         js_urls = read_js_urls_from_file(url_list_file)
@@ -127,12 +138,21 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
 
 def run_fuzzing_independent(input_file, output_dir, args, config, logger):
     """Run fuzzing independently with custom input file"""
-    # Step 1: Get JS URLs from input (could be downloaded files directory or URL list)
+    # Step 1: Get JS URLs from input (could be deduplicated file, downloaded files directory, or URL list)
     input_path = Path(input_file)
     js_urls = []
     
-    if input_path.is_dir():
-        # Input is a directory of downloaded JS files
+    # Check if input is a deduplicated file
+    if input_path.is_file() and input_path.name == CONFIG['files']['deduplicated_js']:
+        logger.log('INFO', f"Using deduplicated JS file as input: {input_path}")
+        js_urls = read_js_urls_from_file(input_file)
+        if js_urls:
+            logger.log('INFO', f"Found {len(js_urls)} URLs from deduplicated file")
+        else:
+            logger.log('WARN', f"Deduplicated file is empty")
+    
+    # If no URLs from deduplicated file, check if input is a directory of downloaded JS files
+    if not js_urls and input_path.is_dir():
         js_files = list(input_path.glob("*.js"))
         if js_files:
             logger.log('INFO', f"Found {len(js_files)} downloaded JS files, extracting URLs...")
@@ -140,8 +160,8 @@ def run_fuzzing_independent(input_file, output_dir, args, config, logger):
             if js_urls:
                 logger.log('INFO', f"Extracted {len(js_urls)} URLs from downloaded JS files")
     
+    # If still no URLs, treat input as a URL list file
     if not js_urls:
-        # Input is a URL list file
         js_urls = read_js_urls_from_file(input_file)
         if not js_urls:
             logger.log('ERROR', f"No JS URLs found in {input_file}")
