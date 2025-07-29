@@ -4,6 +4,10 @@ from .utils import CONFIG, ensure_dir
 import concurrent.futures
 from tqdm import tqdm
 
+
+# Suppress SSL warnings for reconnaissance
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 def run(args, config, logger):
     for target in args.targets:
         target_dir = Path(args.output) / target
