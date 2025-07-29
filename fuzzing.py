@@ -98,8 +98,19 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
     
     # Validate that we have valid paths for fuzzing
     if not unique_paths:
-        logger.log('ERROR', f"[{target}] No valid paths found for fuzzing. Check if URLs are properly formatted.")
-        return False
+        logger.log('WARN', f"[{target}] No valid paths found from extracted URLs. Trying fallback to live URLs...")
+        
+        # Fallback: Try to get paths from live URLs
+        live_urls = read_js_urls_from_file(url_list_file)
+        if live_urls:
+            logger.log('INFO', f"[{target}] Using {len(live_urls)} live URLs as fallback")
+            unique_paths = get_unique_paths_from_urls(live_urls, logger)
+            logger.log('INFO', f"[{target}] Fallback found {len(unique_paths)} unique paths to fuzz")
+        
+        if not unique_paths:
+            logger.log('ERROR', f"[{target}] No valid paths found for fuzzing. Check if URLs are properly formatted.")
+            logger.log('DEBUG', f"[{target}] Extracted URLs that failed: {js_urls}")
+            return False
     
     # Create ffuf results directory
     ffuf_results_dir = target_dir / CONFIG['dirs']['ffuf_results']
@@ -171,6 +182,8 @@ def get_unique_paths_from_urls(urls, logger):
     """Step 2: Get unique paths from live JS files"""
     unique_paths = {}
     
+    logger.log('DEBUG', f"Parsing {len(urls)} URLs for unique paths...")
+    
     for url in urls:
         try:
             # Handle relative URLs by adding a base scheme and domain
@@ -195,19 +208,43 @@ def get_unique_paths_from_urls(urls, logger):
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             path = parsed.path
             
+            logger.log('DEBUG', f"Processing URL: {url}")
+            logger.log('DEBUG', f"  - Base URL: {base_url}")
+            logger.log('DEBUG', f"  - Path: {path}")
+            
             # Get directory path (everything except filename)
-            if path.endswith('.js'):
-                dir_path = '/'.join(path.split('/')[:-1])
+            # Handle URLs that might not end with .js but contain .js
+            if path.endswith('.js') or '.js' in path:
+                # Extract the directory containing the .js file
+                if path.endswith('.js'):
+                    # Standard case: path ends with .js
+                    dir_path = '/'.join(path.split('/')[:-1])
+                else:
+                    # Case where .js is in the middle of the path
+                    js_index = path.find('.js')
+                    if js_index != -1:
+                        # Find the last slash before .js
+                        last_slash = path.rfind('/', 0, js_index)
+                        if last_slash != -1:
+                            dir_path = path[:last_slash]
+                        else:
+                            dir_path = '/'
+                    else:
+                        dir_path = path
+                
                 if not dir_path:
                     dir_path = '/'
                 
                 if dir_path not in unique_paths:
                     unique_paths[dir_path] = base_url
                     logger.log('DEBUG', f"Added path: {dir_path} -> {base_url}")
+            else:
+                logger.log('DEBUG', f"Path does not contain .js: {path}")
         except Exception as e:
             logger.log('DEBUG', f"Error parsing URL {url}: {str(e)}")
             continue
     
+    logger.log('DEBUG', f"Found {len(unique_paths)} unique paths: {list(unique_paths.keys())}")
     return unique_paths
 
 def execute_fuzzing_by_mode(target, live_js_urls, unique_paths, ffuf_results_dir, args, config, logger):
@@ -644,7 +681,8 @@ def extract_urls_from_downloaded_js_files(js_files, logger):
                                     'javascript' in url.lower() or
                                     url.startswith(('http://', 'https://', '//')) or
                                     '.js?' in url or  # URLs with query parameters
-                                    '.js#' in url):   # URLs with fragments
+                                    '.js#' in url or  # URLs with fragments
+                                    '.js' in url):    # URLs containing .js anywhere
                                     # Log the extracted URL for debugging
                                     logger.log('DEBUG', f"Extracted URL from {js_file.name}: {url}")
                                     extracted_urls.add(url)
@@ -673,7 +711,7 @@ def extract_urls_from_downloaded_js_files(js_files, logger):
                             for pattern in url_patterns:
                                 matches = re.findall(pattern, content, re.IGNORECASE)
                                 for match in matches:
-                                    if match and (match.endswith('.js') or '/js/' in match or 'javascript' in match.lower()):
+                                    if match and (match.endswith('.js') or '/js/' in match or 'javascript' in match.lower() or '.js' in match):
                                         logger.log('DEBUG', f"Regex extracted URL from {js_file.name}: {match}")
                                         extracted_urls.add(match)
                     except Exception as e:
