@@ -66,13 +66,21 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
         js_files = list(js_files_dir.glob("*.js"))
         if js_files:
             logger.log('INFO', f"[{target}] Found {len(js_files)} downloaded JS files, extracting URLs...")
-            js_urls = extract_urls_from_downloaded_js_files(js_files, logger)
-            if js_urls:
-                logger.log('INFO', f"[{target}] Extracted {len(js_urls)} URLs from downloaded JS files")
+            extracted_urls = extract_urls_from_downloaded_js_files(js_files, logger)
+            if extracted_urls:
+                # Check if extracted URLs are suitable for fuzzing (have absolute URLs)
+                suitable_urls = [url for url in extracted_urls if url.startswith(('http://', 'https://'))]
+                if suitable_urls:
+                    js_urls = suitable_urls
+                    logger.log('INFO', f"[{target}] Using {len(js_urls)} absolute URLs from downloaded JS files")
+                else:
+                    logger.log('INFO', f"[{target}] No absolute URLs found in downloaded files, will use live URLs")
+            else:
+                logger.log('INFO', f"[{target}] No URLs extracted from downloaded files, will use live URLs")
     
-    # If no URLs from downloaded files, fall back to live JS URLs
+    # If no suitable URLs from downloaded files, fall back to live JS URLs
     if not js_urls:
-        logger.log('INFO', f"[{target}] No URLs from downloaded files, using live JS URLs...")
+        logger.log('INFO', f"[{target}] Using live JS URLs from previous steps...")
         js_urls = read_js_urls_from_file(url_list_file)
         if not js_urls:
             logger.log('ERROR', f"[{target}] No live JS URLs found in {url_list_file}")
@@ -82,6 +90,11 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
     # Step 2: Get unique paths from JS URLs
     unique_paths = get_unique_paths_from_urls(js_urls)
     logger.log('INFO', f"[{target}] Found {len(unique_paths)} unique paths to fuzz")
+    
+    # Validate that we have valid paths for fuzzing
+    if not unique_paths:
+        logger.log('ERROR', f"[{target}] No valid paths found for fuzzing. Check if URLs are properly formatted.")
+        return False
     
     # Create ffuf results directory
     ffuf_results_dir = target_dir / CONFIG['dirs']['ffuf_results']
@@ -155,7 +168,25 @@ def get_unique_paths_from_urls(urls):
     
     for url in urls:
         try:
+            # Handle relative URLs by adding a base scheme and domain
+            if url.startswith('//'):
+                url = 'https:' + url
+            elif url.startswith('/'):
+                # This is a relative URL, we need to skip it or handle it differently
+                logger.log('DEBUG', f"Skipping relative URL: {url}")
+                continue
+            elif not url.startswith(('http://', 'https://')):
+                # Skip malformed URLs
+                logger.log('DEBUG', f"Skipping malformed URL: {url}")
+                continue
+            
             parsed = urlparse(url)
+            
+            # Validate parsed URL
+            if not parsed.scheme or not parsed.netloc:
+                logger.log('DEBUG', f"Skipping invalid URL (missing scheme/netloc): {url}")
+                continue
+            
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             path = parsed.path
             
@@ -167,7 +198,9 @@ def get_unique_paths_from_urls(urls):
                 
                 if dir_path not in unique_paths:
                     unique_paths[dir_path] = base_url
+                    logger.log('DEBUG', f"Added path: {dir_path} -> {base_url}")
         except Exception as e:
+            logger.log('DEBUG', f"Error parsing URL {url}: {str(e)}")
             continue
     
     return unique_paths
@@ -287,6 +320,13 @@ def execute_fuzzing_for_path(target, base_url, dir_path, ffuf_results_dir, args,
     # Build fuzz URL
     fuzz_url = f"{base_url}{dir_path}/FUZZ.{args.fuzz_extensions}"
     safe_path_name = dir_path.strip('/').replace('/', '_') or 'root'
+    
+    # Debug the URL construction
+    logger.log('DEBUG', f"[{target}] Building fuzz URL:")
+    logger.log('DEBUG', f"[{target}]   Base URL: '{base_url}'")
+    logger.log('DEBUG', f"[{target}]   Dir path: '{dir_path}'")
+    logger.log('DEBUG', f"[{target}]   Extensions: '{args.fuzz_extensions}'")
+    logger.log('DEBUG', f"[{target}]   Final fuzz URL: '{fuzz_url}'")
     
     # Run wordlist fuzzing
     if args.fuzz_mode in ["wordlist", "both"]:
@@ -587,13 +627,20 @@ def extract_urls_from_downloaded_js_files(js_files, logger):
                         urls_data = [json.loads(line) for line in stdout.splitlines() if line.strip()]
                         for url_data in urls_data:
                             if 'url' in url_data and url_data['url'].endswith('.js'):
-                                extracted_urls.add(url_data['url'])
+                                url = url_data['url']
+                                # Log the extracted URL for debugging
+                                logger.log('DEBUG', f"Extracted URL from {js_file.name}: {url}")
+                                extracted_urls.add(url)
                     except json.JSONDecodeError:
                         continue
             except Exception as e:
                 logger.log('DEBUG', f"Error extracting URLs from {js_file.name}: {str(e)}")
                 continue
             pbar.update(1)
+    
+    # Log all extracted URLs for debugging
+    if extracted_urls:
+        logger.log('DEBUG', f"All extracted URLs: {list(extracted_urls)}")
     
     logger.log('SUCCESS', f"Extracted {len(extracted_urls)} unique JS URLs from downloaded files")
     return list(extracted_urls)
