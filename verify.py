@@ -1,6 +1,8 @@
-import subprocess
+import requests
 from pathlib import Path
 from .utils import CONFIG, ensure_dir
+import concurrent.futures
+from tqdm import tqdm
 
 def run(args, config, logger):
     for target in args.targets:
@@ -12,20 +14,43 @@ def run(args, config, logger):
         if not all_js_file.exists():
             logger.log('ERROR', f"[{target}] No JS URLs file found")
             continue
-        cmd = ["httpx", "-l", str(all_js_file), "-sc", "-cl", "-mc", "200", "-fl", "0", "-silent", "-o", str(live_js_file)]
-        exit_code, stdout, stderr = _run_command(cmd)
-        if live_js_file.exists():
-            with open(live_js_file, 'r') as f:
-                live_count = sum(1 for _ in f)
-            logger.log('SUCCESS', f"[{target}] Found {live_count} live JS URLs")
-        else:
-            logger.log('ERROR', f"[{target}] Failed to verify live JS files")
-
-def _run_command(cmd, timeout=CONFIG['timeouts']['command']):
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return result.returncode, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return 1, "", f"Command timed out after {timeout} seconds"
-    except Exception as e:
-        return 1, "", str(e)
+        
+        # Read all JS URLs
+        with open(all_js_file, 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+        
+        if not urls:
+            logger.log('WARN', f"[{target}] No JS URLs found to verify")
+            continue
+        
+        logger.log('INFO', f"[{target}] Checking {len(urls)} JS URLs...")
+        
+        # Use ThreadPoolExecutor for concurrent requests
+        max_workers = min(20, len(urls))  # Limit concurrent requests
+        live_urls = []
+        
+        def check_url(url):
+            try:
+                response = requests.get(url, timeout=10, allow_redirects=True, verify=False)
+                if 200 <= response.status_code < 400:  # 20x and 30x status codes
+                    return url
+                return None
+            except requests.exceptions.RequestException:
+                return None
+        
+        with tqdm(total=len(urls), desc=f"[{target}] Verifying URLs", unit="url") as pbar:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_url = {executor.submit(check_url, url): url for url in urls}
+                for future in concurrent.futures.as_completed(future_to_url):
+                    result = future.result()
+                    if result:
+                        live_urls.append(result)
+                    pbar.update(1)
+        
+        # Save live URLs
+        with open(live_js_file, 'w') as f:
+            for url in live_urls:
+                f.write(f"{url}\n")
+        
+        logger.log('SUCCESS', f"[{target}] Found {len(live_urls)} live JS URLs out of {len(urls)} total")
+        return len(live_urls) > 0

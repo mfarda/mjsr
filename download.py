@@ -4,6 +4,9 @@ from .utils import CONFIG, ensure_dir
 import re
 import hashlib
 
+# Optional: Import deduplication module for pre-download hash checking
+# from .deduplication import calculate_file_hash_before_download
+
 def sanitize_filename(url):
     filename = re.sub(r'^https?://', '', url)
     filename = re.sub(r'[\\/*?:"<>|]', '_', filename)
@@ -17,13 +20,18 @@ async def run(args, config, logger):
         target_dir = Path(args.output) / target
         ensure_dir(target_dir)
         logger.log('INFO', f"[{target}] Downloading JavaScript files...")
-        live_js_file = Path(args.input) if args.input else target_dir / CONFIG['files']['live_js']
+        
+        # Use deduplicated file if available, otherwise fall back to live_js
+        input_file = Path(args.input) if args.input else target_dir / CONFIG['files']['deduplicated_js']
+        if not input_file.exists():
+            input_file = target_dir / CONFIG['files']['live_js']
+        
         js_files_dir = target_dir / CONFIG['dirs']['js_files']
         ensure_dir(js_files_dir)
-        if not live_js_file.exists():
+        if not input_file.exists():
             logger.log('WARN', f"[{target}] No live JS URLs found.")
             continue
-        with open(live_js_file, 'r') as f:
+        with open(input_file, 'r') as f:
             urls = [line.split()[0] for line in f if line.strip()]
         if not urls:
             logger.log('WARN', f"[{target}] No live JS URLs found.")
