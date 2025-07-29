@@ -41,9 +41,11 @@ CONFIG = {
         'results_dir': 'ffuf_results',
         'http_status_codes': '200,403,401',
         'output_format': 'json',
-        'fuzz_word': 'FUZZ'
+        'fuzz_word': 'FUZZ',
+        'fuzz_threads': 40,
+        'fuzz_timeout': 10,
     },
-    'dirs': {
+        'dirs': {
         'results': 'results',
         'js_files': 'js_files',
         'ffuf_results': 'ffuf_results',

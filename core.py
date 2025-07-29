@@ -23,8 +23,8 @@ def main():
     parser.add_argument('--fuzz-wordlist', help='Custom wordlist file for fuzzing (required if fuzz-mode is wordlist or both)')
     parser.add_argument('--fuzz-extensions', default='js', help='File extensions to fuzz (default: js)')
     parser.add_argument('--fuzz-status-codes', default='200,403,401', help='HTTP status codes to consider valid (default: 200,403,401)')
-    parser.add_argument('--fuzz-threads', type=int, default=10, help='Number of concurrent fuzzing threads (default: 10)')
-    parser.add_argument('--fuzz-timeout', type=int, default=30, help='Timeout for each fuzzing request in seconds (default: 30)')
+    parser.add_argument('--fuzz-threads', type=int, default=40, help='Number of concurrent fuzzing threads (default: 10)')
+    parser.add_argument('--fuzz-timeout', type=int, default=10, help='Timeout for each fuzzing request in seconds (default: 30)')
     parser.add_argument('--fuzz-no-timeout', action='store_true', help='Disable timeout for ffuf (useful for large wordlists)')
     
     # Gather specific arguments

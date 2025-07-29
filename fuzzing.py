@@ -2,6 +2,7 @@ import subprocess
 import json
 import os
 import re
+import time
 from pathlib import Path
 from tqdm import tqdm
 from urllib.parse import urlparse
@@ -105,6 +106,7 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
     
     # Step 2: Get unique paths from JS URLs
     unique_paths = get_unique_paths_from_urls(js_urls, logger)
+    breakpoint()  # DEBUG: Inspect unique_paths here
     logger.log('INFO', f"[{target}] Found {len(unique_paths)} unique paths to fuzz")
     
     # Validate that we have valid paths for fuzzing
@@ -278,6 +280,7 @@ def execute_fuzzing_by_mode(target, live_js_urls, unique_paths, ffuf_results_dir
     unique_js_filenames = []
     if args.fuzz_mode in ["permutation", "both"]:
         unique_js_filenames = get_unique_js_filenames(live_js_urls)
+        breakpoint()  # DEBUG: Inspect unique_js_filenames here
         logger.log('INFO', f"[{target}] Found {len(unique_js_filenames)} unique JS filenames for permutation")
     
     # Generate permutation wordlist if needed
@@ -331,18 +334,13 @@ def generate_permutation_wordlist(target, js_filenames, ffuf_results_dir, logger
     
     # Hardcoded prefixes and suffixes
     prefixes = [
-        'app', 'lib', 'test', 'spec', 'src', 'dist', 'build', 'vendor', 'node', 'client', 'server', 'common',
-        'utils', 'core', 'api', 'config', 'polyfill', 'plugin', 'module', 'feature', 'mock', 'temp', 'backup', 'dev',
-        'prod', 'stage', 'local', 'global', 'init', '_', 'is', 'has', 'are', 'get', 'set', 'fetch', 'calculate',
-        'compute', 'apply', 'push', 'post', 'render', 'start', 'stop', 'on', 'handle', 'create', 'update', 'delete'
+        'app', 'lib', 'test', 'spec', 'src', 'dist', 'build', 'vendor', 'node', 'client', 'server', 'common', '_' 
     ]
     
     suffixes = [
-        'js', 'minjs', 'bundlejs', 'map', 'testjs', 'specjs', 'modulejs', 'mjs', 'cjs', 'nodejs', 'v1js', 'v2js',
-        'debugjs', 'prodjs', 'devjs', 'bak', 'backup', 'tmp', 'temp', 'old', 'orig', 'copy', 'save', 'gz', 'zip',
-        'tar', 'tgz', 'es6js', 'jsx', 'private', 'test', 'spec', 'min', 'dev', 'prod', 'v1', 'v2', 'const', 'enum',
-        'config', 'utils', 'api', 'handler', 'module', 'cache'
+        'app', 'lib', 'test', 'spec', 'src', 'dist', 'build', 'vendor', 'node', 'client', 'server', 'common', '_' 
     ]
+    
     
     separators = ['', '-', '_', '.']
     
@@ -383,12 +381,14 @@ def execute_fuzzing_for_path(target, base_url, dir_path, ffuf_results_dir, args,
     fuzz_url = f"{base_url}{dir_path}/FUZZ.{args.fuzz_extensions}"
     safe_path_name = dir_path.strip('/').replace('/', '_') or 'root'
     
-    # Debug the URL construction
+    # Enhanced logging for fuzz URL construction
+    logger.log('INFO', f"[{target}] Starting fuzzing for path: {dir_path}")
     logger.log('DEBUG', f"[{target}] Building fuzz URL:")
     logger.log('DEBUG', f"[{target}]   Base URL: '{base_url}'")
     logger.log('DEBUG', f"[{target}]   Dir path: '{dir_path}'")
     logger.log('DEBUG', f"[{target}]   Extensions: '{args.fuzz_extensions}'")
     logger.log('DEBUG', f"[{target}]   Final fuzz URL: '{fuzz_url}'")
+    logger.log('DEBUG', f"[{target}]   Safe path name: '{safe_path_name}'")
     
     # Run wordlist fuzzing
     if args.fuzz_mode in ["wordlist", "both"]:
@@ -396,19 +396,38 @@ def execute_fuzzing_for_path(target, base_url, dir_path, ffuf_results_dir, args,
             logger.log('ERROR', f"[{target}] Wordlist file required for wordlist mode")
             return False
         
+        logger.log('INFO', f"[{target}] Starting wordlist fuzzing for path: {dir_path}")
         output_file = ffuf_results_dir / f"ffuf_wordlist_{safe_path_name}.txt"
-        run_ffuf_command(
+        logger.log('DEBUG', f"[{target}] Wordlist output file: {output_file}")
+        
+        success = run_ffuf_command(
             target, fuzz_url, args.fuzz_wordlist, output_file, 
             "wordlist", args, logger
         )
+        
+        if success:
+            logger.log('SUCCESS', f"[{target}] Wordlist fuzzing completed for path: {dir_path}")
+        else:
+            logger.log('ERROR', f"[{target}] Wordlist fuzzing failed for path: {dir_path}")
     
     # Run permutation fuzzing
     if args.fuzz_mode in ["permutation", "both"] and permutation_wordlist:
+        logger.log('INFO', f"[{target}] Starting permutation fuzzing for path: {dir_path}")
         output_file = ffuf_results_dir / f"ffuf_permutation_{safe_path_name}.txt"
-        run_ffuf_command(
+        logger.log('DEBUG', f"[{target}] Permutation output file: {output_file}")
+        logger.log('DEBUG', f"[{target}] Using permutation wordlist: {permutation_wordlist}")
+        
+        success = run_ffuf_command(
             target, fuzz_url, str(permutation_wordlist), output_file, 
             "permutation", args, logger
         )
+        
+        if success:
+            logger.log('SUCCESS', f"[{target}] Permutation fuzzing completed for path: {dir_path}")
+        else:
+            logger.log('ERROR', f"[{target}] Permutation fuzzing failed for path: {dir_path}")
+    
+    logger.log('INFO', f"[{target}] Completed fuzzing for path: {dir_path}")
 
 def run_ffuf_command(target, fuzz_url, wordlist, output_file, fuzz_type, args, logger):
     """Run ffuf command with enhanced configuration and progress tracking"""
@@ -433,8 +452,16 @@ def run_ffuf_command(target, fuzz_url, wordlist, output_file, fuzz_type, args, l
         "-v"  # Verbose output for better debugging
     ]
     
+    # Enhanced logging for ffuf execution
     logger.log('INFO', f"[{target}] Running ffuf {fuzz_type} on {fuzz_url}")
-    logger.log('DEBUG', f"[{target}] Wordlist size: {wordlist_size}, Command: {' '.join(cmd)}")
+    logger.log('INFO', f"[{target}] Fuzzing configuration:")
+    logger.log('INFO', f"[{target}]   - Wordlist: {wordlist}")
+    logger.log('INFO', f"[{target}]   - Wordlist size: {wordlist_size:,} words")
+    logger.log('INFO', f"[{target}]   - Status codes: {args.fuzz_status_codes}")
+    logger.log('INFO', f"[{target}]   - Threads: {args.fuzz_threads}")
+    logger.log('INFO', f"[{target}]   - Timeout per request: {args.fuzz_timeout}s")
+    logger.log('INFO', f"[{target}]   - Output file: {output_file}")
+    logger.log('DEBUG', f"[{target}] Full command: {' '.join(cmd)}")
     
     # Calculate timeout
     if args.fuzz_no_timeout:
@@ -442,21 +469,36 @@ def run_ffuf_command(target, fuzz_url, wordlist, output_file, fuzz_type, args, l
         logger.log('INFO', f"[{target}] Running ffuf without timeout")
     else:
         timeout = calculate_ffuf_timeout(wordlist_size, args.fuzz_threads, args.fuzz_timeout)
-        logger.log('DEBUG', f"[{target}] Estimated timeout: {timeout}s")
+        logger.log('INFO', f"[{target}] Estimated total timeout: {timeout}s")
+        logger.log('DEBUG', f"[{target}] Timeout calculation: ({wordlist_size} words / {args.fuzz_threads} threads) * {args.fuzz_timeout}s * 1.5 = {timeout}s")
     
     # Run ffuf with progress tracking
+    logger.log('INFO', f"[{target}] Starting ffuf {fuzz_type} execution...")
     exit_code, stdout, stderr = run_command_with_progress(cmd, timeout, wordlist_size, target, fuzz_type, logger)
     
-    # Process results
+    # Process results with enhanced logging
+    logger.log('INFO', f"[{target}] ffuf {fuzz_type} execution completed (exit code: {exit_code})")
+    
     if exit_code == 0 and output_file.exists() and output_file.stat().st_size > 0:
         results_count = count_ffuf_results(output_file)
-        logger.log('SUCCESS', f"[{target}] ffuf {fuzz_type} completed: {results_count} results found")
+        file_size = output_file.stat().st_size
+        logger.log('SUCCESS', f"[{target}] ffuf {fuzz_type} completed successfully:")
+        logger.log('SUCCESS', f"[{target}]   - Results found: {results_count}")
+        logger.log('SUCCESS', f"[{target}]   - Output file size: {file_size:,} bytes")
+        logger.log('SUCCESS', f"[{target}]   - Output file: {output_file}")
         return True
     elif exit_code == 0 and output_file.exists():
-        logger.log('WARN', f"[{target}] ffuf {fuzz_type} completed but no results found")
+        file_size = output_file.stat().st_size
+        logger.log('WARN', f"[{target}] ffuf {fuzz_type} completed but no results found:")
+        logger.log('WARN', f"[{target}]   - Output file size: {file_size:,} bytes")
+        logger.log('WARN', f"[{target}]   - Output file: {output_file}")
         return True
     else:
-        logger.log('ERROR', f"[{target}] ffuf {fuzz_type} failed (exit code: {exit_code}): {stderr}")
+        logger.log('ERROR', f"[{target}] ffuf {fuzz_type} failed:")
+        logger.log('ERROR', f"[{target}]   - Exit code: {exit_code}")
+        logger.log('ERROR', f"[{target}]   - Error output: {stderr}")
+        if stdout:
+            logger.log('DEBUG', f"[{target}]   - Standard output: {stdout}")
         return False
 
 def count_wordlist_lines(wordlist_path):
@@ -476,6 +518,7 @@ def run_command_with_progress(cmd, timeout, wordlist_size, target, fuzz_type, lo
     """Run ffuf command with progress tracking"""
     try:
         # Start ffuf process
+        logger.log('DEBUG', f"[{target}] Starting ffuf process...")
         process = subprocess.Popen(
             cmd, 
             stdout=subprocess.PIPE, 
@@ -487,6 +530,11 @@ def run_command_with_progress(cmd, timeout, wordlist_size, target, fuzz_type, lo
         
         # Monitor progress
         results_found = 0
+        progress_updates = 0
+        start_time = time.time()
+        
+        logger.log('DEBUG', f"[{target}] Monitoring ffuf {fuzz_type} progress...")
+        
         try:
             while True:
                 output = process.stdout.readline()
@@ -495,22 +543,39 @@ def run_command_with_progress(cmd, timeout, wordlist_size, target, fuzz_type, lo
                 if output:
                     # Parse ffuf output for progress
                     if ':: Progress' in output:
-                        # Extract progress information
-                        logger.log('DEBUG', f"[{target}] {fuzz_type}: {output.strip()}")
+                        progress_updates += 1
+                        # Log progress every 10 updates to avoid spam
+                        if progress_updates % 10 == 0:
+                            logger.log('INFO', f"[{target}] {fuzz_type} progress: {output.strip()}")
+                        else:
+                            logger.log('DEBUG', f"[{target}] {fuzz_type}: {output.strip()}")
                     elif ':: Result' in output:
                         results_found += 1
-                        logger.log('DEBUG', f"[{target}] {fuzz_type}: Found result #{results_found}")
+                        logger.log('INFO', f"[{target}] {fuzz_type}: Found result #{results_found}")
+                        logger.log('DEBUG', f"[{target}] {fuzz_type}: {output.strip()}")
+                    elif ':: Error' in output:
+                        logger.log('WARN', f"[{target}] {fuzz_type} error: {output.strip()}")
+                    else:
+                        logger.log('DEBUG', f"[{target}] {fuzz_type}: {output.strip()}")
             
             # Wait for process to complete
             stdout, stderr = process.communicate(timeout=timeout)
+            execution_time = time.time() - start_time
+            
+            logger.log('INFO', f"[{target}] {fuzz_type} execution completed in {execution_time:.2f}s")
+            logger.log('INFO', f"[{target}] {fuzz_type} found {results_found} results during execution")
+            
             return process.returncode, stdout, stderr
             
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
+            execution_time = time.time() - start_time
+            logger.log('ERROR', f"[{target}] {fuzz_type} timed out after {execution_time:.2f}s")
             return 1, stdout, f"Command timed out after {timeout} seconds"
             
     except Exception as e:
+        logger.log('ERROR', f"[{target}] {fuzz_type} process error: {str(e)}")
         return 1, "", str(e)
 
 def count_ffuf_results(output_file):
