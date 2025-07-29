@@ -11,6 +11,11 @@ def run(args, config, logger):
     Deduplicate JS URLs by checking for identical content using HTTP headers
     and conditional requests to avoid downloading duplicate files.
     """
+    # Handle independent mode
+    if args.independent:
+        return run_independent(args, config, logger)
+    
+    # Normal mode - process all targets
     for target in args.targets:
         target_dir = Path(args.output) / target
         ensure_dir(target_dir)
@@ -100,6 +105,104 @@ def run(args, config, logger):
         
         logger.log('SUCCESS', f"[{target}] Deduplication complete: {len(unique_urls)} unique URLs (removed {duplicate_count} duplicates)")
         return len(unique_urls) > 0
+
+def run_independent(args, config, logger):
+    """Run deduplicate module independently with custom input file"""
+    input_file = Path(args.input)
+    if not input_file.exists():
+        logger.log('ERROR', f"Input file not found: {input_file}")
+        return False
+    
+    # Determine output file
+    if args.output:
+        output_dir = Path(args.output)
+        ensure_dir(output_dir)
+        output_file = output_dir / "deduplicated_urls.txt"
+    else:
+        # Use same directory as input file
+        output_file = input_file.parent / "deduplicated_urls.txt"
+    
+    logger.log('INFO', f"Deduplicating URLs from: {input_file}")
+    logger.log('INFO', f"Output will be saved to: {output_file}")
+    
+    # Read URLs
+    with open(input_file, 'r') as f:
+        urls = [line.strip() for line in f if line.strip()]
+    
+    if not urls:
+        logger.log('WARN', "No URLs found to deduplicate")
+        return False
+    
+    logger.log('INFO', f"Deduplicating {len(urls)} URLs...")
+    
+    # Group URLs by domain for better organization
+    domain_groups = {}
+    for url in urls:
+        domain = urlparse(url).netloc
+        if domain not in domain_groups:
+            domain_groups[domain] = []
+        domain_groups[domain].append(url)
+    
+    unique_urls = []
+    duplicate_count = 0
+    
+    # Process each domain separately
+    for domain, domain_urls in domain_groups.items():
+        logger.log('INFO', f"Processing domain: {domain} ({len(domain_urls)} URLs)")
+        
+        # Use ThreadPoolExecutor for concurrent HEAD requests
+        max_workers = min(10, len(domain_urls))
+        
+        def check_url_headers(url):
+            try:
+                # First try HEAD request to get headers
+                response = requests.head(url, timeout=10, allow_redirects=True, verify=False)
+                if response.status_code == 200:
+                    # Get content identifiers
+                    etag = response.headers.get('ETag', '').strip('"')
+                    content_length = response.headers.get('Content-Length', '')
+                    last_modified = response.headers.get('Last-Modified', '')
+                    
+                    # Create a content identifier
+                    content_id = f"{etag}_{content_length}_{last_modified}"
+                    
+                    return {
+                        'url': url,
+                        'content_id': content_id,
+                        'etag': etag,
+                        'content_length': content_length,
+                        'last_modified': last_modified
+                    }
+                return None
+            except requests.exceptions.RequestException:
+                return None
+        
+        # Get headers for all URLs in this domain
+        content_map = {}
+        with tqdm(total=len(domain_urls), desc=f"Checking {domain}", unit="url") as pbar:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_url = {executor.submit(check_url_headers, url): url for url in domain_urls}
+                for future in concurrent.futures.as_completed(future_to_url):
+                    result = future.result()
+                    if result:
+                        content_id = result['content_id']
+                        if content_id in content_map:
+                            duplicate_count += 1
+                            logger.log('DEBUG', f"Duplicate found: {result['url']} (same as {content_map[content_id]['url']})")
+                        else:
+                            content_map[content_id] = result
+                            unique_urls.append(result['url'])
+                    pbar.update(1)
+    
+    # Save deduplicated URLs
+    with open(output_file, 'w') as f:
+        for url in unique_urls:
+            f.write(f"{url}\n")
+    
+    logger.log('SUCCESS', f"Deduplication complete: {len(unique_urls)} unique URLs (removed {duplicate_count} duplicates)")
+    logger.log('INFO', f"Results saved to: {output_file}")
+    
+    return len(unique_urls) > 0
 
 def calculate_file_hash_before_download(url, logger, target=""):
     """
