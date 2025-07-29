@@ -74,8 +74,12 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
                 if suitable_urls:
                     js_urls = suitable_urls
                     logger.log('INFO', f"[{target}] Using {len(js_urls)} absolute URLs from downloaded JS files")
+                    logger.log('INFO', f"[{target}] Total extracted URLs: {len(extracted_urls)}, Absolute URLs: {len(js_urls)}")
+                    logger.log('DEBUG', f"[{target}] Absolute URLs: {js_urls}")
+                    logger.log('DEBUG', f"[{target}] Filtered out URLs: {[url for url in extracted_urls if not url.startswith(('http://', 'https://'))]}")
                 else:
                     logger.log('INFO', f"[{target}] No absolute URLs found in downloaded files, will use live URLs")
+                    logger.log('INFO', f"[{target}] Total extracted URLs: {len(extracted_urls)}, Absolute URLs: 0")
             else:
                 logger.log('INFO', f"[{target}] No URLs extracted from downloaded files, will use live URLs")
     
