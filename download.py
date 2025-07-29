@@ -42,11 +42,13 @@ async def run(args, config, logger):
                             if response.status == 200:
                                 content = await response.read()
                                 file_hash = hashlib.sha256(content).hexdigest()
+                                logger.log('DEBUG', f"[{target}] [{index+1}/{total}] Hash: {file_hash[:16]}... for URL: {url}")
                                 async with hash_lock:
                                     if file_hash in hash_set:
-                                        logger.log('INFO', f"[{target}] [{index+1}/{total}] Duplicate content skipped: {url}")
+                                        logger.log('INFO', f"[{target}] [{index+1}/{total}] Duplicate content skipped: {url} (hash_set size: {len(hash_set)})")
                                         return False
                                     hash_set.add(file_hash)
+                                    logger.log('DEBUG', f"[{target}] [{index+1}/{total}] Added hash to set. New size: {len(hash_set)}")
                                 base_filename = sanitize_filename(url)
                                 filename = f"{base_filename}__{file_hash}.js"
                                 file_path = js_files_dir / filename
