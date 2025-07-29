@@ -1,6 +1,7 @@
 import subprocess
 import json
 import os
+import re
 from pathlib import Path
 from tqdm import tqdm
 from urllib.parse import urlparse
@@ -88,7 +89,7 @@ def run_fuzzing_for_target(target, target_dir, url_list_file, args, config, logg
         logger.log('INFO', f"[{target}] Found {len(js_urls)} live JS URLs")
     
     # Step 2: Get unique paths from JS URLs
-    unique_paths = get_unique_paths_from_urls(js_urls)
+    unique_paths = get_unique_paths_from_urls(js_urls, logger)
     logger.log('INFO', f"[{target}] Found {len(unique_paths)} unique paths to fuzz")
     
     # Validate that we have valid paths for fuzzing
@@ -133,7 +134,7 @@ def run_fuzzing_independent(input_file, output_dir, args, config, logger):
         logger.log('INFO', f"Found {len(js_urls)} JS URLs from file")
     
     # Step 2: Get unique paths from JS URLs
-    unique_paths = get_unique_paths_from_urls(js_urls)
+    unique_paths = get_unique_paths_from_urls(js_urls, logger)
     logger.log('INFO', f"Found {len(unique_paths)} unique paths to fuzz")
     
     # Create ffuf results directory
@@ -162,7 +163,7 @@ def read_js_urls_from_file(file_path):
         print(f"Error reading file {file_path}: {e}")
     return urls
 
-def get_unique_paths_from_urls(urls):
+def get_unique_paths_from_urls(urls, logger):
     """Step 2: Get unique paths from live JS files"""
     unique_paths = {}
     
@@ -611,28 +612,69 @@ def run_command(cmd, timeout=CONFIG['timeouts']['command']):
         return 1, "", str(e)
 
 def extract_urls_from_downloaded_js_files(js_files, logger):
-    """Extract URLs from downloaded JS files using jsluice"""
+    """Extract URLs from downloaded JS files using jsluice and regex fallback"""
     extracted_urls = set()
     
     logger.log('INFO', f"Extracting URLs from {len(js_files)} JS files...")
     
     with tqdm(total=len(js_files), desc="Extracting URLs", unit="file") as pbar:
         for js_file in js_files:
+            file_urls_found = 0  # Count URLs found for this specific file
+            
             try:
                 # Use jsluice to extract URLs from JS file
                 exit_code, stdout, stderr = run_command(["jsluice", "urls", str(js_file)])
                 
                 if exit_code == 0 and stdout.strip():
+                    logger.log('DEBUG', f"jsluice output for {js_file.name}: {stdout[:200]}...")
                     try:
                         urls_data = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+                        logger.log('DEBUG', f"Parsed {len(urls_data)} URL entries from {js_file.name}")
+                        
                         for url_data in urls_data:
-                            if 'url' in url_data and url_data['url'].endswith('.js'):
+                            if 'url' in url_data:
                                 url = url_data['url']
-                                # Log the extracted URL for debugging
-                                logger.log('DEBUG', f"Extracted URL from {js_file.name}: {url}")
-                                extracted_urls.add(url)
-                    except json.JSONDecodeError:
-                        continue
+                                # Accept more URL patterns, not just .js files
+                                if (url.endswith('.js') or 
+                                    '/js/' in url or 
+                                    'javascript' in url.lower() or
+                                    url.startswith(('http://', 'https://', '//')) or
+                                    '.js?' in url or  # URLs with query parameters
+                                    '.js#' in url):   # URLs with fragments
+                                    # Log the extracted URL for debugging
+                                    logger.log('DEBUG', f"Extracted URL from {js_file.name}: {url}")
+                                    extracted_urls.add(url)
+                                    file_urls_found += 1
+                                else:
+                                    logger.log('DEBUG', f"Skipped URL from {js_file.name}: {url} (doesn't match JS patterns)")
+                    except json.JSONDecodeError as e:
+                        logger.log('DEBUG', f"JSON decode error for {js_file.name}: {str(e)}")
+                else:
+                    logger.log('DEBUG', f"No jsluice output for {js_file.name} (exit code: {exit_code})")
+                
+                # Fallback: Use regex to extract URLs if jsluice didn't find URLs for this file
+                if file_urls_found == 0:
+                    try:
+                        with open(js_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            # Extract URLs using regex patterns
+                            url_patterns = [
+                                r'["\']([^"\']*\.js[^"\']*)["\']',  # URLs in quotes
+                                r'["\']([^"\']*\/js\/[^"\']*)["\']',  # URLs with /js/ path
+                                r'["\']([^"\']*javascript[^"\']*)["\']',  # URLs with javascript
+                                r'["\'](https?://[^"\']*)["\']',  # HTTP/HTTPS URLs
+                                r'["\'](//[^"\']*)["\']',  # Protocol-relative URLs
+                            ]
+                            
+                            for pattern in url_patterns:
+                                matches = re.findall(pattern, content, re.IGNORECASE)
+                                for match in matches:
+                                    if match and (match.endswith('.js') or '/js/' in match or 'javascript' in match.lower()):
+                                        logger.log('DEBUG', f"Regex extracted URL from {js_file.name}: {match}")
+                                        extracted_urls.add(match)
+                    except Exception as e:
+                        logger.log('DEBUG', f"Error in regex fallback for {js_file.name}: {str(e)}")
+                
             except Exception as e:
                 logger.log('DEBUG', f"Error extracting URLs from {js_file.name}: {str(e)}")
                 continue
@@ -642,5 +684,5 @@ def extract_urls_from_downloaded_js_files(js_files, logger):
     if extracted_urls:
         logger.log('DEBUG', f"All extracted URLs: {list(extracted_urls)}")
     
-    logger.log('SUCCESS', f"Extracted {len(extracted_urls)} unique JS URLs from downloaded files")
+    logger.log('SUCCESS', f"Extracted {len(extracted_urls)} unique URLs from downloaded files")
     return list(extracted_urls)
