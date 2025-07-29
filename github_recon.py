@@ -149,6 +149,7 @@ class GitHubRecon:
         
         for query in search_queries:
             try:
+                self.logger.log('DEBUG', f'Searching with query: {query}')
                 url = f"{self.github_search_base}/repositories?q={quote(query)}&sort=updated&order=desc&per_page=100"
                 results = self._make_github_request(url)
                 
@@ -277,7 +278,7 @@ class GitHubRecon:
             clone_dir.mkdir(parents=True, exist_ok=True)
             
             if clone_dir.exists() and any(clone_dir.iterdir()):
-                self.logger.log('INFO', f'Repository {repo_name} already cloned, skipping...')
+                self.logger.log('DEBUG', f'Repository {repo_name} already cloned, skipping...')
                 return clone_dir
             
             self.logger.log('INFO', f'Cloning repository: {repo_name}')
@@ -309,7 +310,7 @@ class GitHubRecon:
             return secrets
         
         try:
-            self.logger.log('INFO', f'Scanning {repo_path.name} with TruffleHog')
+            self.logger.log('DEBUG', f'Scanning {repo_path.name} with TruffleHog')
             
             cmd = ['trufflehog', '--json', str(repo_path)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -349,7 +350,7 @@ class GitHubRecon:
             return secrets
         
         try:
-            self.logger.log('INFO', f'Scanning {repo_path.name} with GitLeaks')
+            self.logger.log('DEBUG', f'Scanning {repo_path.name} with GitLeaks')
             
             cmd = ['gitleaks', 'detect', '--source', str(repo_path), '--report-format', 'json', '--report-path', '/dev/stdout']
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -384,7 +385,7 @@ class GitHubRecon:
         secrets = []
         
         try:
-            self.logger.log('INFO', f'Scanning {repo_path.name} with custom patterns')
+            self.logger.log('DEBUG', f'Scanning {repo_path.name} with custom patterns')
             
             for file_path in repo_path.rglob('*'):
                 if file_path.is_file() and file_path.stat().st_size < 10 * 1024 * 1024:  # Skip files > 10MB

@@ -122,6 +122,18 @@ python -m mjsrecon.core report --independent --input analysis_results/
 python -m mjsrecon.core github --independent --input targets.txt
 ```
 
+**Logging Options:**
+```sh
+# Quiet mode - only show warnings and errors
+python -m mjsrecon.core github --targets company-name -q
+
+# Verbose mode - show debug information
+python -m mjsrecon.core github --targets company-name -v
+
+# Normal mode - show info, warnings, and errors (default)
+python -m mjsrecon.core github --targets company-name
+```
+
 **Advanced Fuzzing Examples:**
 ```sh
 # Wordlist fuzzing with custom settings

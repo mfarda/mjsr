@@ -13,6 +13,10 @@ def main():
     parser.add_argument('--input', help='Input file for the current command (overrides default)')
     parser.add_argument('--independent', action='store_true', help='Run modules independently with custom input files')
     
+    # Logging options
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging (debug level)')
+    parser.add_argument('-q', '--quiet', action='store_true', help='Suppress info messages (warning level only)')
+    
     # Fuzzing specific arguments
     parser.add_argument('--fuzz-mode', choices=['wordlist', 'permutation', 'both', 'off'], default='off', 
                        help='Fuzzing mode: wordlist only, permutation only, both, or off (default: off)')
@@ -53,9 +57,9 @@ def main():
     else:
         args.targets = []
 
-    # Setup logger
+    # Setup logger with verbosity options
     log_file = Path(args.output) / "js_recon.log"
-    logger = Logger(log_file)
+    logger = Logger(log_file, verbose=args.verbose, quiet=args.quiet)
 
     # Check tools only if not in independent mode
     if not args.independent:
