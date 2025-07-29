@@ -9,6 +9,7 @@ def main():
     parser.add_argument('commands', nargs='+', choices=['gather', 'verify', 'deduplicate', 'download', 'analyze', 'fuzz'], help='Commands to run in sequence')
     parser.add_argument('-t', '--targets', required=True, help='Target domains (comma-separated)')
     parser.add_argument('-o', '--output', default='./output', help='Output directory')
+    parser.add_argument('-d', '--depth', type=int, default=5, help='Katana crawl depth (for gather)')
     parser.add_argument('--input', help='Input file for the current command (overrides default)')
     args = parser.parse_args()
 
