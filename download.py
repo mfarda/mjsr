@@ -47,7 +47,8 @@ async def run(args, config, logger):
                                         logger.log('INFO', f"[{target}] [{index+1}/{total}] Duplicate content skipped: {url}")
                                         return False
                                     hash_set.add(file_hash)
-                                filename = sanitize_filename(url)
+                                base_filename = sanitize_filename(url)
+                                filename = f"{base_filename}__{file_hash}.js"
                                 file_path = js_files_dir / filename
                                 if file_path.exists():
                                     logger.log('INFO', f"[{target}] [{index+1}/{total}] Duplicate filename skipped: {url}")
